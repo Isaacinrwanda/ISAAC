@@ -1,38 +1,26 @@
 
-import { ReactNode } from 'react';
-
-export enum Language {
-  Kinyarwanda = 'rw',
-  English = 'en',
-  French = 'fr',
+export enum InterviewState {
+  COVER_PAGE,
+  SETUP,
+  INTERVIEWING,
+  FEEDBACK,
+  ERROR,
 }
 
-export interface VocabularyItem {
-  word: string;
-  definition: string;
+export interface ChatMessage {
+  role: 'user' | 'model';
+  content: string;
 }
 
-export interface StoryContent {
-  title: string;
-  description: string;
-  text: string[];
-  moral: string;
-  vocabulary: VocabularyItem[];
+export interface FeedbackReport {
+  overallAssessment: string;
+  keyStrengths: string;
+  areasForImprovement: string;
+  score: number;
+  scoreRationale: string;
 }
 
-export interface Story {
-  id: number;
-  content: {
-    [Language.Kinyarwanda]: StoryContent;
-    [Language.English]: StoryContent;
-    [Language.French]: StoryContent;
-  };
-  coverImage: string;
-  illustration: React.FC<{ className?: string; onClick?: () => void; }>;
-}
-
-export interface ReadingStat {
-  storyId: number;
-  timeSpent: number; // in seconds
-  readCount: number;
+export interface InterviewConfig {
+  company: string;
+  role: string;
 }

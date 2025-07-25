@@ -1,87 +1,165 @@
 
-import React, { useState, useEffect } from 'react';
-import Header from './components/Header';
-import StoryCard from './components/StoryCard';
-import StoryView from './components/StoryView';
-import ParentDashboard from './components/ParentDashboard';
-import { Language, Story } from './types';
-import { STORIES } from './constants';
-import { BellIcon, XIcon } from './components/icons';
+import React, { useState, useCallback, useRef, useContext } from 'react';
+import { Chat } from '@google/genai';
+import { InterviewState } from './types';
+import type { ChatMessage, FeedbackReport, InterviewConfig } from './types';
+import { createChatSession } from './services/geminiService';
+import { LanguageContext } from './contexts/LanguageContext';
+
+import CoverPage from './components/CoverPage';
+import SetupForm from './components/SetupForm';
+import ChatWindow from './components/ChatWindow';
+import FeedbackDisplay from './components/FeedbackDisplay';
+import LoadingSpinner from './components/LoadingSpinner';
+import LanguageSwitcher from './components/LanguageSwitcher';
 
 const App: React.FC = () => {
-  type View = 'library' | 'story' | 'dashboard';
-  const [currentView, setCurrentView] = useState<View>('library');
-  const [selectedStory, setSelectedStory] = useState<Story | null>(null);
-  const [language, setLanguage] = useState<Language>(Language.English);
-  const [showNotification, setShowNotification] = useState(true);
+  const [interviewState, setInterviewState] = useState<InterviewState>(InterviewState.COVER_PAGE);
+  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<FeedbackReport | null>(null);
+  
+  const chatSessionRef = useRef<Chat | null>(null);
+  const { locale, t } = useContext(LanguageContext);
 
-  const handleSelectStory = (id: number) => {
-    const story = STORIES.find(s => s.id === id);
-    if (story) {
-      setSelectedStory(story);
-      setCurrentView('story');
+  const handleProceedFromCover = () => {
+    setInterviewState(InterviewState.SETUP);
+  };
+
+  const handleStartInterview = useCallback(async (config: InterviewConfig) => {
+    setIsLoading(true);
+    setError(null);
+    setChatHistory([]);
+
+    try {
+      chatSessionRef.current = createChatSession(config, locale);
+      setInterviewState(InterviewState.INTERVIEWING);
+
+      const responseStream = await chatSessionRef.current.sendMessageStream({ message: 'Hello' });
+      
+      let fullResponse = '';
+      setChatHistory(prev => [...prev, { role: 'model', content: '' }]);
+
+      for await (const chunk of responseStream) {
+        if (chunk.text) {
+          fullResponse += chunk.text;
+          setChatHistory(prev => {
+            const newHistory = [...prev];
+            newHistory[newHistory.length - 1] = { role: 'model', content: fullResponse };
+            return newHistory;
+          });
+        }
+      }
+      
+    } catch (e) {
+      console.error(e);
+      setError(t('error.start'));
+      setInterviewState(InterviewState.ERROR);
+    } finally {
+      setIsLoading(false);
     }
-  };
+  }, [locale, t]);
 
-  const handleBack = () => {
-    setSelectedStory(null);
-    setCurrentView('library');
-  };
+  const handleSendMessage = useCallback(async (message: string) => {
+    if (!chatSessionRef.current) return;
+    
+    setChatHistory(prev => [...prev, { role: 'user', content: message }]);
+    setIsLoading(true);
 
-  const handleNavigate = (view: 'library' | 'dashboard') => {
-    setSelectedStory(null);
-    setCurrentView(view);
+    try {
+      const responseStream = await chatSessionRef.current.sendMessageStream({ message });
+      
+      let fullResponse = '';
+      setChatHistory(prev => [...prev, { role: 'model', content: '' }]);
+      
+      for await (const chunk of responseStream) {
+         if (chunk.text) {
+          fullResponse += chunk.text;
+          setChatHistory(prev => {
+            const newHistory = [...prev];
+            newHistory[newHistory.length - 1] = { role: 'model', content: fullResponse };
+            return newHistory;
+          });
+        }
+      }
+
+    } catch (e) {
+      console.error(e);
+      setError(t('error.sendMessage'));
+      setInterviewState(InterviewState.ERROR);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [t]);
+
+  const handleEndInterview = useCallback(async () => {
+    if (!chatSessionRef.current) return;
+    
+    setIsLoading(true);
+    setError(null);
+    try {
+      const response = await chatSessionRef.current.sendMessage({ message: 'END_INTERVIEW' });
+      const feedbackText = response.text;
+      
+      const parsedFeedback: FeedbackReport = JSON.parse(feedbackText);
+      setFeedback(parsedFeedback);
+      setInterviewState(InterviewState.FEEDBACK);
+
+    } catch (e) {
+      console.error(e);
+      setError(t('error.end'));
+      setInterviewState(InterviewState.ERROR);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [t]);
+  
+  const handleRestart = () => {
+    setInterviewState(InterviewState.SETUP);
+    setChatHistory([]);
+    setFeedback(null);
+    setError(null);
+    chatSessionRef.current = null;
   }
 
-  useEffect(() => {
-    const timer = setTimeout(() => {
-        setShowNotification(false);
-    }, 8000);
-    return () => clearTimeout(timer);
-  }, [])
-  
-
   const renderContent = () => {
-    switch (currentView) {
-      case 'story':
-        return selectedStory ? <StoryView story={selectedStory} language={language} onBack={handleBack} /> : null;
-      case 'dashboard':
-        return <ParentDashboard language={language}/>;
-      case 'library':
-      default:
+    switch (interviewState) {
+      case InterviewState.COVER_PAGE:
+        return <CoverPage onProceed={handleProceedFromCover} />;
+      case InterviewState.SETUP:
+        return <SetupForm onStart={handleStartInterview} isLoading={isLoading} />;
+      case InterviewState.INTERVIEWING:
+        return <ChatWindow messages={chatHistory} onSendMessage={handleSendMessage} onEndInterview={handleEndInterview} onRestart={handleRestart} isLoading={isLoading} />;
+      case InterviewState.FEEDBACK:
+        return feedback ? <FeedbackDisplay report={feedback} onRestart={handleRestart}/> : <LoadingSpinner/>;
+      case InterviewState.ERROR:
         return (
-          <div className="container mx-auto p-4 md:p-8">
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-8">
-              {STORIES.map(story => (
-                <StoryCard key={story.id} story={story} language={language} onSelect={handleSelectStory} />
-              ))}
-            </div>
+          <div className="text-center p-8 bg-white dark:bg-gray-800 shadow-2xl rounded-2xl">
+            <h2 className="text-2xl font-bold text-red-500 mb-4">{t('error.title')}</h2>
+            <p className="text-gray-600 dark:text-gray-300 mb-6">{error}</p>
+            <button
+                onClick={handleRestart}
+                className="px-6 py-2 text-md font-medium text-white bg-brand-primary hover:bg-brand-dark rounded-lg shadow-md"
+            >
+                {t('error.restartButton')}
+            </button>
           </div>
         );
+      default:
+        return <SetupForm onStart={handleStartInterview} isLoading={isLoading} />;
     }
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-blue-100 via-yellow-50 to-green-100">
-      <Header currentView={currentView === 'dashboard' ? 'dashboard' : 'library'} onNavigate={handleNavigate} language={language} onLanguageChange={setLanguage}/>
-      <main>
-        {renderContent()}
-      </main>
-
-      {showNotification && (
-        <div className="fixed bottom-4 right-4 max-w-sm w-full bg-white rounded-2xl shadow-2xl p-4 flex items-start gap-4 animate-notification-slide-in z-50">
-            <div className="bg-yellow-400 p-3 rounded-full">
-                <BellIcon className="h-6 w-6 text-yellow-800" />
-            </div>
-            <div>
-                <h4 className="font-bold text-gray-800">Your daily story is here!</h4>
-                <p className="text-sm text-gray-600">Discover a new adventure today and keep learning.</p>
-            </div>
-            <button onClick={() => setShowNotification(false)} className="absolute top-2 right-2 text-gray-400 hover:text-gray-600">
-                <XIcon className="w-5 h-5"/>
-            </button>
-        </div>
-      )}
+    <div className="min-h-screen w-full flex flex-col items-center justify-center p-4 bg-gray-100 dark:bg-gray-900 font-sans">
+      <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-brand-primary to-brand-secondary opacity-10 dark:opacity-20 z-0"></div>
+      <div className="absolute top-4 right-4 z-20">
+        <LanguageSwitcher />
+      </div>
+      <div className="relative z-10 w-full">
+         {renderContent()}
+      </div>
     </div>
   );
 };

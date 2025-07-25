@@ -1,6 +1,5 @@
 {
-  "name": "Inkurunziza: Interactive Storybook",
-  "description": "An interactive storybook application for children to read stories in multiple languages, track their progress, and learn new vocabulary. Features include text-to-speech with word highlighting and a parent dashboard.",
-  "requestFramePermissions": [],
-  "prompt": ""
+  "name": "AI Persona Interviewer",
+  "description": "An AI-powered application that simulates a real job interview. The AI acts as an interviewer from a specific company for a specific role, providing contextual questions and detailed feedback.",
+  "requestFramePermissions": []
 }
