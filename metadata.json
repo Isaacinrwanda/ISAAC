@@ -1,0 +1,6 @@
+{
+  "name": "Inkurunziza: Interactive Storybook",
+  "description": "An interactive storybook application for children to read stories in multiple languages, track their progress, and learn new vocabulary. Features include text-to-speech with word highlighting and a parent dashboard.",
+  "requestFramePermissions": [],
+  "prompt": ""
+}
